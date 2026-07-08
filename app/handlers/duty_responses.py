@@ -261,7 +261,9 @@ async def on_transfer_candidate_input(message: Message, state: FSMContext):
     # Exclude candidates who already declined ANY of the selected projects (loop guard)
     declined: set[int] = set()
     for ap_id in selected:
-        declined |= await database.get_declined_candidates_for_project(ap_id)
+        declined |= await database.get_declined_candidates_for_project(
+            data["session_id"], ap_id
+        )
     results = [r for r in results if r["id"] not in declined]
     if not results:
         await message.answer(

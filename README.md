@@ -62,6 +62,11 @@ The final schedule image the bot publishes to participants (all data is fictiona
 - One-click publishing of the schedule image to every registered user
 
 **Reliability and security**
+- SQLite in WAL mode over a single shared connection (`busy_timeout`,
+  foreign-key enforcement); writes serialised with an asyncio lock,
+  hot-path queries covered by indexes
+- Namesake-safe contact imports: ambiguous full-name matches are skipped
+  and reported to the admin instead of silently merging two people
 - Rate limiting: 20 messages/min, 5 commands/sec, 5-minute auto-ban
 - Parameterised SQL only; HTML escaping of all user input; control-character
   sanitisation

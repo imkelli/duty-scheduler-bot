@@ -227,9 +227,21 @@ async def _do_import(chat_id: int):
     if backup:
         logger.info(f"Pre-import backup created: {backup.name}")
     try:
-        await excel_parser.import_phones(EXCEL_FILE)
+        upserted, ambiguous = await excel_parser.import_phones(EXCEL_FILE)
         await _refresh_admin_tag()  # admin tag may have changed in the new file
-        await bot.send_message(chat_id, "<b>✓ Импорт завершён</b>\n<i>Данные из листа Phones обновлены.</i>")
+        text = (
+            "<b>✓ Импорт завершён</b>\n"
+            f"<i>Обновлено записей: {upserted}.</i>"
+        )
+        if ambiguous:
+            names_block = "\n".join(f"· {esc(n)}" for n in sorted(ambiguous))
+            text += (
+                "\n\n<b>⚠️ Тёзки — пропущены, нужно ручное уточнение</b>\n"
+                "<i>В базе несколько записей с таким ФИО; автоматическое "
+                "обновление могло бы склеить разных людей:</i>\n"
+                f"<pre>{names_block}</pre>"
+            )
+        await bot.send_message(chat_id, text)
     except excel_parser.ExcelError as e:
         await bot.send_message(chat_id, f"<b>Ошибка импорта</b>\n{e}")
     except ValueError as e:

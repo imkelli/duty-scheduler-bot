@@ -113,11 +113,15 @@ def _split_phone_email(raw: str) -> tuple[str, str]:
     return phone, email
 
 
-async def import_phones(excel_path: str):
+async def import_phones(excel_path: str) -> tuple[int, list[str]]:
     """
     Import engineers from the Phones sheet into the database atomically.
     Validates the file first, parses everything in memory, then commits in a
     single transaction. On any error, the DB is left untouched.
+
+    Returns (upserted_count, ambiguous_names): имена, по которым в базе
+    несколько записей (тёзки), пропущены — их показывает администратору
+    вызывающий код (_do_import).
     """
     from app.middlewares import security
     security.validate_excel(excel_path, required_sheet="Phones")
@@ -148,7 +152,7 @@ async def import_phones(excel_path: str):
     if not pending:
         raise ValueError("В листе 'Phones' не найдено ни одной валидной строки.")
 
-    await database.bulk_upsert_engineers(pending)
+    return await database.bulk_upsert_engineers(pending)
 
 
 def _parse_period_start(label: str) -> Optional[date]:

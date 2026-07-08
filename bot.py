@@ -33,7 +33,11 @@ async def main():
         ],
         scope=BotCommandScopeDefault(),
     )
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        # Shutdown-хук: корректно закрыть общее соединение с БД
+        await database.close()
 
 
 if __name__ == "__main__":
