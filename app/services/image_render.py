@@ -4,17 +4,20 @@ Render the final duty schedule as a PNG image (Pillow).
 Data source is identical to the xlsx export (scheduler.build_schedule_data):
 each row = {full_name, phone, telegram_tag, email, projects, no_duty}.
 
-Cross-platform font loading: prefers a bundled DejaVuSans.ttf (drop it into
-assets/ on Linux), then bundled Arial (copied from Windows), then Pillow's
-built-in default as a last resort.
+Cross-platform font loading from <project root>/assets/: prefers the bundled
+DejaVuSans.ttf (shipped with the repo, free license), then Arial if present.
+If no font is found — a clear error listing the expected files (a silent
+fallback to Pillow's bitmap font rendered Cyrillic as unreadable boxes).
 """
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
-_ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+# assets/ lives at the project root (app/services/ -> two levels up)
+_ASSETS = Path(__file__).resolve().parent.parent.parent / "assets"
 
 # Font candidates in priority order: (regular, bold)
 _FONT_CANDIDATES = [
@@ -58,14 +61,19 @@ C_FOOTER      = (120, 128, 140)
 def _load_font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont:
     for regular, boldname in _FONT_CANDIDATES:
         name = boldname if bold else regular
-        path = os.path.join(_ASSETS, name)
-        if os.path.exists(path):
+        path = _ASSETS / name
+        if path.exists():
             try:
-                return ImageFont.truetype(path, size)
+                return ImageFont.truetype(str(path), size)
             except Exception:
                 continue
-    # Last resort — Pillow built-in (may lack good cyrillic metrics)
-    return ImageFont.load_default()
+    wanted = ", ".join(f"{r}+{b}" for r, b in _FONT_CANDIDATES)
+    raise RuntimeError(
+        f"No font found for PNG schedule rendering. Put one of these pairs "
+        f"into {_ASSETS}: {wanted}. DejaVuSans is bundled with the repo; on "
+        f"Ubuntu: apt install fonts-dejavu-core (files in "
+        f"/usr/share/fonts/truetype/dejavu/)."
+    )
 
 
 def _meaningful(value) -> str:
