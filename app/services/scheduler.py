@@ -314,12 +314,31 @@ async def _session_state_signature(session_id: int) -> str:
     Stable hash of the session's per-project state. Changes whenever ANY
     project status or current handler changes — used to auto-invalidate the
     cached PNG (no manual invalidation hooks needed).
+
+    Включает и КОНТАКТНЫЕ поля исполнителя (ФИО/телефон/тег/почта): картинка
+    печатает их, но раньше в сигнатуру они не входили — после /import с
+    переименованием тот же состав давал прежний хэш и старый кэш PNG.
     """
     aps = await database.get_session_assignment_projects(session_id)
-    parts = [
-        f"{ap['id']}:{ap['status']}:{ap['current_handler_id']}:{ap['project_name']}"
-        for ap in sorted(aps, key=lambda a: a["id"])
-    ]
+
+    # Контакты исполнителей — тем же источником, что и рендер (get_engineer_by_id
+    # содержит email). Кэшируем по id, чтобы не дёргать БД на каждый проект.
+    handler_ids = {ap["current_handler_id"] or ap["engineer_id"] for ap in aps}
+    contacts: dict[int, str] = {}
+    for eid in handler_ids:
+        e = await database.get_engineer_by_id(eid)
+        contacts[eid] = "-" if not e else "~".join(
+            str(e.get(k) or "") for k in
+            ("full_name", "phone", "telegram_tag", "email")
+        )
+
+    parts = []
+    for ap in sorted(aps, key=lambda a: a["id"]):
+        handler = ap["current_handler_id"] or ap["engineer_id"]
+        parts.append(
+            f"{ap['id']}:{ap['status']}:{ap['current_handler_id']}:"
+            f"{ap['project_name']}:{contacts.get(handler, '-')}"
+        )
     raw = "|".join(parts)
     return hashlib.md5(raw.encode("utf-8")).hexdigest()[:16]
 

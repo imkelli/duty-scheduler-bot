@@ -1020,12 +1020,30 @@ async def search_engineers(query: str) -> list[dict]:
 
 
 async def create_duty_session(period: str) -> int:
+    """Создать сессию опроса, атомарно вытеснив ранее активные.
+
+    Любые ещё активные (finalized=0) сессии помечаются SESSION_SUPERSEDED в
+    той же транзакции — иначе они копятся как «активные» и всплывают в
+    get_active_session после отмены свежей (баг «график отменённого опроса»).
+    История сохраняется: строки не удаляются, только меняют статус.
+    """
     async with _db_write() as db:
+        cur = await db.execute(
+            "UPDATE duty_sessions SET finalized=? WHERE finalized=?",
+            (SESSION_SUPERSEDED, SESSION_ACTIVE),
+        )
+        superseded = cur.rowcount
         cursor = await db.execute(
             "INSERT INTO duty_sessions (period) VALUES (?)", (period,)
         )
+        new_id = cursor.lastrowid
         await db.commit()
-        return cursor.lastrowid
+    if superseded:
+        logger.info(
+            f"SESSION_SUPERSEDED count={superseded} on new session={new_id} "
+            f"period={period!r}"
+        )
+    return new_id
 
 
 async def get_duty_session(session_id: int) -> Optional[dict]:
@@ -1117,6 +1135,11 @@ async def finalize_session(session_id: int):
 SESSION_ACTIVE = 0
 SESSION_FINALIZED = 1
 SESSION_CANCELLED = 2
+# «Вытеснена» новым опросом (запуск нового опроса без «Пересоздать»).
+# Отдельный статус, а не переиспользование CANCELLED: это другое событие в
+# истории (не ручная отмена админом), и is_session_cancelled его не считает
+# отменой. Сессия перестаёт быть активной (finalized != 0).
+SESSION_SUPERSEDED = 3
 
 
 async def cancel_session(session_id: int):
@@ -1259,15 +1282,29 @@ async def get_active_assignments_for_engineer(engineer_id: int) -> list[dict]:
 
 
 async def get_active_session() -> Optional[dict]:
-    """Return the most recent non-finalized session, or None."""
+    """Return the most recent active (finalized=0) session, or None.
+
+    Если активных сессий больше одной — это аномалия (create_duty_session
+    должен был вытеснить прежние): логируем WARNING со списком id, но
+    поведение сохраняем — берём свежайшую. Молчать нельзя: именно тишина
+    прятала баг «график отменённого опроса».
+    """
     async with _db() as db:
         async with db.execute(
-            "SELECT id, period, finalized FROM duty_sessions WHERE finalized=0 ORDER BY id DESC LIMIT 1"
+            "SELECT id, period, finalized FROM duty_sessions "
+            "WHERE finalized=0 ORDER BY id DESC"
         ) as cursor:
-            row = await cursor.fetchone()
-    if row:
-        return {"id": row[0], "period": row[1], "finalized": row[2]}
-    return None
+            rows = await cursor.fetchall()
+    if not rows:
+        return None
+    if len(rows) > 1:
+        logger.warning(
+            "MULTIPLE_ACTIVE_SESSIONS: %d активных (finalized=0), ids=%s; "
+            "беру свежайшую id=%s",
+            len(rows), [r[0] for r in rows], rows[0][0],
+        )
+    row = rows[0]
+    return {"id": row[0], "period": row[1], "finalized": row[2]}
 
 
 async def delete_session(session_id: int):
